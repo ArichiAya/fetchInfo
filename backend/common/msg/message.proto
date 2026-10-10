@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package quotedata;
+
+option go_package = "github.com/ArichiAya/fetch-info/common/msg";
+
+message Quote{
+    double bid_p = 1; //买价
+    int64 bid_v = 2; //买量
+    double ask_p = 3; //卖价
+    int64 ask_v = 4;   //卖量
+}
+
+message Tick{
+    string symbol = 1;  //标的代码
+    double open = 2;  //开盘价
+    double high = 3;  //最高价
+    double low = 4;   //最低价
+    double price = 5; //最新价
+    int64 cum_volume = 6;  //成交总量/最新成交量,累计值
+    double cum_amount = 7;    //成交总金额/最新成交额,累计值
+    int64 trade_type = 8;  //交易类型 1: ‘双开’, 2: ‘双平’, 3: ‘多开’, 4: ‘空开’, 5: ‘空平’, 6: ‘多平’, 7: ‘多换’, 8: ‘空换’
+    int64 last_volume = 9; //瞬时成交量
+    int64 cum_position = 10; //合约持仓量(期),累计值（股票此值为 0）
+    double last_amount = 11;  //瞬时成交额 (郑商所 last_amount 为 0)
+    string created_at = 12;   //创建时间
+    repeated Quote quotes = 13;  //list[quote]	股票提供买卖 1-5 档,list[0]~list[4]分别对应买卖一档到五档；跌停时无买方报价，涨停时无卖方报价
+    double iopv = 14; //基金份额参考净值，(只适用于基金)
+}
+
+message Bar{
+    string symbol = 1;   //标的代码
+    string frequency = 2;    //频率
+    double open = 3;  //开盘价
+    double close = 4; //收盘价
+    double high = 5;  //最高价
+    double low = 6;   //最低价
+    double amount = 7;    //成交额
+    int64 volume = 8;  //成交量
+    string bob = 9;  //bar 开始时间
+    string eob = 10; //bar 结束时间
+}
+
+message Tick2 {
+    Tick tick_row   = 1;
+    int64 delta_v   = 2;
+    double vwap     = 3;
+    double p_book   = 4;
+    double slope_bid = 5;
+    double slope_ask = 6;
+    double spread    = 7;
+}
+
+message Bar2 {
+	Bar bar_row = 1;
+	double body_ratio = 2;
+}

@@ -1,0 +1,83 @@
+// Command server:分析/报表 API 服务。
+//
+// 职责:
+//   - internal/query   :从 TimescaleDB 只读查询 bar/指标(连续聚合加速报表)
+//   - internal/report  :生成数据报表(JSON/CSV/图表数据)
+//   - internal/trigger :分析请求满足条件时,触发交易(复用 market/internal/strategy 的求值逻辑)
+//   - internal/httpapi :HTTP 路由与 handler,鉴权走 business/auth 下发的 token
+//
+// 待实现清单:
+//  1. internal/query:TimescaleDB 只读查询
+//  2. internal/report:报表生成
+//  3. internal/httpapi:路由骨架(登录态校验中间件)
+//  4. internal/trigger:与 market 的联动方式(消息/直接调用)
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/ArichiAya/fetch-info/analysis/internal/httpapi"
+	"github.com/ArichiAya/fetch-info/common/auth"
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	databaseURL string = "postgres://iiot_admin:changeme_please_2024@192.168.80.131:5432/mktdata"
+	port        string = "8555"
+)
+
+func main() {
+	pool, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+	router := gin.Default()
+	jwtAuthMiddleware, err := auth.NewAuthMiddleware(pool)
+	if err != nil {
+		log.Fatal("Failed to create auth middleware:", err)
+	}
+
+	router.POST("/login", jwtAuthMiddleware.LoginHandler)
+	router.NoRoute(func(c *gin.Context) {
+		c.JSON(404, gin.H{"error": "Not Found"})
+	})
+
+	authGroup := router.Group("/api", jwtAuthMiddleware.MiddlewareFunc())
+	authGroup.GET("/refresh_token", jwtAuthMiddleware.RefreshHandler)
+	authGroup.GET("/market/stocks/search", httpapi.SearchStocksHandler(pool))
+	authGroup.GET("/market/stocks/:code/snapshot", httpapi.GetStockSnapshotHandler(pool))
+	authGroup.GET("/market/stocks/:code/tick", httpapi.GetStockTickHandler(pool))
+	authGroup.GET("/market/stocks/:code/kline", httpapi.GetStockKlineHandler(pool))
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	<-shutdown
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	pool.Close()
+
+	log.Println("Server shutdown")
+}

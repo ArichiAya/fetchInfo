@@ -1,0 +1,30 @@
+// src/assets/styles/theme.scss
+// 运行时主题 CSS 变量：亮色默认，html.dark 切暗色
+// 与 components/charts/palette.ts 的亮/暗色板保持一致
+// 在 main.ts 中引入一次；切换方式：document.documentElement.classList.toggle('dark')
+
+:root {
+  // 背景
+  --bg-page: #f9f9f7;
+  --bg-card: #fcfcfb;
+  // 文字
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  // 边框与分割线
+  --border-color: #e1e0d9;
+  // 涨跌（红涨绿跌，与 K 线一致）
+  --rise-color: #e34948;
+  --fall-color: #008300;
+}
+
+html.dark {
+  --bg-page: #0d0d0d;
+  --bg-card: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --border-color: #2c2c2a;
+  --rise-color: #e66767;
+  --fall-color: #008300;
+}

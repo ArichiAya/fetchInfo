@@ -1,0 +1,87 @@
+// src/assets/styles/variables.scss
+// ⚠️ 本文件通过 vite.config.ts 的 additionalData 注入到每个 <style lang="scss">
+// 因此只能包含「零输出」的内容：SCSS 变量与 mixin（不写任何选择器规则）
+// 运行时主题（暗色模式）的 CSS 变量请见 theme.scss
+
+// ============ 一、主题色（与 Element Plus 默认一致） ============
+$primary-color: #409eff;
+$success-color: #67c23a;
+$warning-color: #e6a23c;
+$danger-color: #f56c6c;
+$info-color: #909399;
+
+// ============ 二、文字色（与图表色板 palette.ts 对齐） ============
+$text-primary: #0b0b0b;
+$text-secondary: #52514e;
+$text-muted: #898781;
+
+// ============ 三、背景与边框 ============
+$bg-color-base: #f9f9f7;  // 页面底色
+$bg-color-card: #fcfcfb;  // 卡片 / 图表表面
+$border-color: #e1e0d9;   // 细分割线 / 网格线
+
+// ============ 四、间距刻度（4 的倍数） ============
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 12px;
+$spacing-lg: 16px;
+$spacing-xl: 24px;
+
+// ============ 五、字号 ============
+$font-size-sm: 12px;
+$font-size-base: 14px;
+$font-size-lg: 16px;
+
+// ============ 六、圆角 ============
+$radius-sm: 6px;
+$radius-md: 8px;
+$radius-lg: 12px;
+
+// ============ 七、z-index 层级 ============
+$z-index-dropdown: 1000;
+$z-index-modal: 2000;
+$z-index-message: 3000;
+
+// ============ 八、断点（配合 respond-to mixin） ============
+$breakpoint-sm: 768px;
+$breakpoint-md: 992px;
+$breakpoint-lg: 1200px;
+
+// ============ 九、常用 Mixin ============
+
+// 弹性居中
+@mixin flex-center($direction: row) {
+  display: flex;
+  flex-direction: $direction;
+  justify-content: center;
+  align-items: center;
+}
+
+// 单行文本省略
+@mixin text-ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// 多行文本省略
+@mixin text-clamp($lines: 2) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: $lines;
+  overflow: hidden;
+}
+
+// 响应式断点：@include respond-to($breakpoint-md) { ... }
+@mixin respond-to($breakpoint) {
+  @media (max-width: $breakpoint) {
+    @content;
+  }
+}
+
+// 卡片表面（背景 + 圆角 + 阴影），配合 theme.scss 的 var(--bg-card) 自动适配暗色
+@mixin card-surface {
+  background: var(--bg-card, $bg-color-card);
+  border-radius: $radius-md;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
