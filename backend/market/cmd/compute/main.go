@@ -133,6 +133,8 @@ func main() {
 					if err := proto.Unmarshal(msgData, newtick); err != nil {
 						log.Fatalf("Fail to Unmarshal Tick message: %v", err)
 					}
+					// 打印tick信息
+					// log.Printf("Received tick for %s: %s", newtick.Symbol, newtick.String())
 					// 计算指标
 					iAVG := indicator.CaliAVG(newtick.Quotes)
 					quoteslength := float64(len(newtick.Quotes))

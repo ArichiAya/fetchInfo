@@ -7,7 +7,6 @@ import type {
   TickPoint,
   KLineDay,
   PositionItem,
-  PositionItemWithValue,
   SubscriptionItem,
   KpiItem,
   StockSymbol,
@@ -105,19 +104,8 @@ export const POSITIONS: PositionItem[] = [
   { code: '000001', name: '平安银行', shares: 1000, cost: 12.2, price: 12.86 }
 ]
 
-/** 计算持仓市值与盈亏 */
-export function calcPositionValue(items: PositionItem[]): PositionItemWithValue[] {
-  return items.map((p) => {
-    const marketValue = p.shares * p.price
-    const profit = (p.price - p.cost) * p.shares
-    return {
-      ...p,
-      marketValue: Number(marketValue.toFixed(2)),
-      profit: Number(profit.toFixed(2)),
-      profitPercent: Number((((p.price - p.cost) / p.cost) * 100).toFixed(2))
-    }
-  })
-}
+// 市值与盈亏的计算已挪到 @/utils/stock，这里转出去保持向后兼容
+export { calcPositionValue } from '@/utils/stock'
 
 // ---------- 已订阅（写死初始 2 条） ----------
 export const INITIAL_SUBSCRIPTIONS: SubscriptionItem[] = [

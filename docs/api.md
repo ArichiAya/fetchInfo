@@ -78,6 +78,8 @@ GET /api/market/stocks/{code}/snapshot
   这样天然跳过周末与节假日，不需要交易日历。一个交易日内结果不变，可缓存。
   注意**不要用今开顶替**（A股有集合竞价，`open ≠ prevClose`），也不要查 Kafka（`bar2.new`/topic 保留期只有 1 天，周一与节后查不到）。
 
+- **`prevClose` / `change` / `changePercent` 可以为 `null`** —— 库里只有今天的数据时（系统刚上线、或该 symbol 昨天没跑）没有昨收，涨跌幅就没有基准。此时三个字段一起回 `null`，前端据此隐藏这一行；**不要回 0**，那会让卡片显示 `+0.00 (0.00%)`，看着像"今天没涨没跌"。
+
 KPI 卡片映射：「现价」→ `price`+`changePercent`；「今日最高」→ `high`；「成交额」→ `cumAmount`；「持仓市值」→ 前端从持仓聚合，不单独出接口。
 
 ### 3. 分时数据

@@ -1,13 +1,23 @@
 /**
- * 统一请求层：注入服务前缀、解析后端统一错误体、把失败统一抛成 ApiRequestError
+ * 统一请求层：注入服务前缀与 JWT、解析后端统一错误体、把失败统一抛成 ApiRequestError
  * 契约见 docs/api.md
  */
 import type { ApiErrorBody } from '@/types/stock'
 
-/** 行情查询服务 */
+/** 行情查询服务（analysis/cmd/server） */
 export const MARKET_BASE = '/api/market'
-/** 订阅与持仓服务 */
+/** 订阅与持仓服务（business/cmd/server，尚未实现） */
 export const BUSINESS_BASE = '/api/business'
+
+const TOKEN_KEY = 'fcinfo_token'
+
+/** 后端鉴权走 `Authorization: Bearer <token>`（common/auth 的 TokenLookup 配置） */
+export const getToken = () => localStorage.getItem(TOKEN_KEY)
+
+export const setToken = (token: string | null) => {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
 
 /** 后端返回的错误，携带 HTTP 状态码与业务错误码，便于调用侧分流提示 */
 export class ApiRequestError extends Error {
@@ -23,7 +33,11 @@ export class ApiRequestError extends Error {
 }
 
 async function request<T>(base: string, url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${base}${url}`, opts)
+  const headers = new Headers(opts?.headers)
+  const token = getToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const res = await fetch(`${base}${url}`, { ...opts, headers })
 
   // 204 No Content（取消订阅）没有响应体
   if (res.status === 204) return undefined as T
@@ -31,8 +45,10 @@ async function request<T>(base: string, url: string, opts?: RequestInit): Promis
   const body = await res.json().catch(() => null)
 
   if (!res.ok) {
+    // token 失效就丢掉，避免拿着废 token 反复 401
+    if (res.status === 401) setToken(null)
+
     const err = (body as ApiErrorBody | null)?.error
-    // TODO 鉴权接入后在此处理 401（跳登录页）
     throw new ApiRequestError(
       res.status,
       err?.code ?? 'UNKNOWN',

@@ -32,4 +32,7 @@ declare module 'vue' {
     PositionTable: typeof import('./src/components/PositionTable.vue')['default']
     TickChart: typeof import('./src/components/charts/TickChart.vue')['default']
   }
+  export interface GlobalDirectives {
+    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
+  }
 }

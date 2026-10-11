@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"log"
-	"os"
 	"time"
 
 	jwt "github.com/appleboy/gin-jwt/v2"
@@ -17,23 +16,13 @@ type login struct {
 	Password string `form:"password" json:"password" binding:"required"`
 }
 
-var (
-	identityKey = "id"
-	jwtKey      string
-)
+var identityKey = "id"
 
 // User demo
 type User struct {
 	UserId   int
 	UserName string
 	role     string
-}
-
-func init() {
-	jwtKey = os.Getenv("jwt-key")
-	if jwtKey == "" {
-		log.Fatal("JWT key is not set")
-	}
 }
 
 // func main() {
@@ -56,8 +45,8 @@ func init() {
 // 	}
 // }
 
-func NewAuthMiddleware(pool *pgxpool.Pool) (*jwt.GinJWTMiddleware, error) {
-	return jwt.New(initParams(pool))
+func NewAuthMiddleware(pool *pgxpool.Pool, jwtKey string) (*jwt.GinJWTMiddleware, error) {
+	return jwt.New(initParams(pool, jwtKey))
 }
 
 // func registerRoute(r *gin.Engine, handle *jwt.GinJWTMiddleware) {
@@ -78,7 +67,7 @@ func HandlerMiddleware(authMiddleware *jwt.GinJWTMiddleware) gin.HandlerFunc {
 	}
 }
 
-func initParams(pool *pgxpool.Pool) *jwt.GinJWTMiddleware {
+func initParams(pool *pgxpool.Pool, jwtKey string) *jwt.GinJWTMiddleware {
 	return &jwt.GinJWTMiddleware{
 		Realm:       "test zone",
 		Key:         []byte(jwtKey),

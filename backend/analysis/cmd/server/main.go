@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,10 +23,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ArichiAya/fetch-info/analysis/internal/httpapi"
+	"github.com/ArichiAya/fetch-info/analysis/internal/httpapi/v1"
 	"github.com/ArichiAya/fetch-info/common/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -34,12 +36,35 @@ const (
 )
 
 func main() {
+	// 设置日志输出到文件和标准输出
+	file, err := os.OpenFile("app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	// 组合文件和标准输出
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	log.SetOutput(multiWriter)
+
+	if err := godotenv.Load(".env"); err != nil {
+		log.Println("load .env error:", err)
+	}
+
+	jwtKey := os.Getenv("jwt_key")
+	if jwtKey == "" {
+		log.Fatal("JWT key is not set")
+	}
+
+	gin.DefaultWriter = multiWriter
+	gin.DefaultErrorWriter = multiWriter
+
 	pool, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
 	router := gin.Default()
-	jwtAuthMiddleware, err := auth.NewAuthMiddleware(pool)
+	jwtAuthMiddleware, err := auth.NewAuthMiddleware(pool, jwtKey)
 	if err != nil {
 		log.Fatal("Failed to create auth middleware:", err)
 	}

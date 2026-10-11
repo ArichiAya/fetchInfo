@@ -73,8 +73,8 @@ func FetchTickData(ctx context.Context, p *pgxpool.Pool, symbol string, start ti
 		if s == symbol {
 			// 查询 tick 数据
 			tableName := symbol + "_Tick2"
-			queryStr := "SELECT * FROM " + tableName + " WHERE time >= $1 AND time <= $2"
-			safeQueryStr := pgx.Identifier{queryStr}.Sanitize()
+			queryStr := "SELECT * FROM " + pgx.Identifier{tableName}.Sanitize()
+			safeQueryStr := fmt.Sprint(queryStr, " WHERE time >= $1 AND time <= $2")
 			rows, err := p.Query(ctx, safeQueryStr, start, end)
 			if err != nil {
 				return nil, fmt.Errorf("Fail to query tick data: %v", err)
@@ -115,8 +115,8 @@ func FetchBarData(ctx context.Context, p *pgxpool.Pool, symbol string, start tim
 		if s == symbol {
 			// 查询 bar 数据
 			tableName := symbol + "_Bar2"
-			queryStr := "SELECT * FROM " + tableName + " WHERE time >= $1 AND time <= $2"
-			safeQueryStr := pgx.Identifier{queryStr}.Sanitize()
+			queryStr := "SELECT * FROM " + pgx.Identifier{tableName}.Sanitize()
+			safeQueryStr := fmt.Sprint(queryStr, " WHERE time >= $1 AND time <= $2")
 			rows, err := p.Query(ctx, safeQueryStr, start, end)
 			if err != nil {
 				return nil, fmt.Errorf("Fail to query bar data: %v", err)

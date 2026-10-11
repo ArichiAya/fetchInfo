@@ -45,14 +45,17 @@ export interface Snapshot {
   ts: string
   /** 现价 */
   price: number
-  /** 昨收 */
-  prevClose: number
+  /**
+   * 昨收（上一交易日收盘价）
+   * 库里只有今天的数据时为 null（系统刚上线，没有昨收可作基准）
+   */
+  prevClose: number | null
   high: number
   low: number
-  /** 涨跌额 = price - prevClose */
-  change: number
-  /** 涨跌幅 % */
-  changePercent: number
+  /** 涨跌额 = price - prevClose，无昨收时为 null */
+  change: number | null
+  /** 涨跌幅 %，无昨收时为 null */
+  changePercent: number | null
   /** 当日累计成交量（手） */
   cumVolume: number
   /** 当日累计成交额（元） */
