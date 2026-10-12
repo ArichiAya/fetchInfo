@@ -37,14 +37,17 @@ export const fetchTickData = (code: string, date?: string, signal?: AbortSignal)
  * K 线数据
  * @param period 周期，1m / 5m / 15m / 1d
  * @param limit  返回根数
+ * @param date   缺省为当前时间。后端取的是 `date ± 7 天`这个窗口里的 bar，
+ *               格式 `YYYY-MM-DD HH:MM:SS`（注意与 /tick 的 `YYYY-MM-DD` 不同）
  */
 export const fetchKLineData = (
   code: string,
   period = '1d',
   limit = 30,
+  date?: string,
   signal?: AbortSignal
 ) => {
-  const query = `period=${period}&limit=${limit}`
+  const query = `period=${period}&limit=${limit}${date ? `&date=${encodeURIComponent(date)}` : ''}`
   return marketRequest<KLineDay[]>(`/stocks/${encodeURIComponent(code)}/kline?${query}`, {
     signal
   })

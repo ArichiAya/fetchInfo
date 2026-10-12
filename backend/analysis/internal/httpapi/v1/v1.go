@@ -7,13 +7,25 @@ package httpapi
 
 import (
 	"context"
+	"log"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ArichiAya/fetch-info/common/msg"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// fail 统一错误体,与 docs/api.md 的约定一致:
+//
+//	{ "error": { "code": "...", "message": "..." } }
+func fail(c *gin.Context, status int, code, message string) {
+	log.Print(status, gin.H{"error": gin.H{"code": code, "message": message}})
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
+}
 
 // GET /api/market/stocks/search?keyword=101&limit=10
 // | 参数    | 类型   | 必填 | 说明               |
@@ -30,7 +42,7 @@ func SearchStocksHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		queryStr := `SELECT symbol FROM subscribe WHERE symbol ILIKE '%' || $1 || '%' LIMIT $2`
 		rows, err := pool.Query(c.Request.Context(), queryStr, keyword, limit)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to query database"})
+			fail(c, 500, "INTERNAL", "Failed to query database")
 			return
 		}
 		defer rows.Close()
@@ -39,7 +51,7 @@ func SearchStocksHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		for rows.Next() {
 			var symbol string
 			if err := rows.Scan(&symbol); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to scan row"})
+				fail(c, 500, "INTERNAL", "Failed to scan row")
 				return
 			}
 			symbols = append(symbols, symbol)
@@ -79,19 +91,21 @@ func GetStockSnapshotHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		row := pool.QueryRow(c.Request.Context(), queryStr, code)
 		var symbol string
 		if err := row.Scan(&symbol); err != nil {
-			c.JSON(404, gin.H{"error": "Stock code not found"})
+			fail(c, 404, "SYMBOL_NOT_FOUND", "Stock code not found")
 			return
 		}
 
 		// 最新一条 tick:现价、当日累计、当日极值
-		tableName := symbol + "_Tick2"
+		// 把symbol字母转成小写,dot转成_
+		symbol = strings.ToLower(strings.ReplaceAll(symbol, ".", "_"))
+		tableName := symbol + "_tick2"
 		safeTable := pgx.Identifier{tableName}.Sanitize()
 
 		var latest msg.Tick
 		var vwap float64
 		latestQuery := `SELECT tick_row,vwap from ` + safeTable + ` ORDER BY created_at DESC LIMIT 1`
 		if err := pool.QueryRow(c.Request.Context(), latestQuery).Scan(&latest, &vwap); err != nil {
-			c.JSON(404, gin.H{"error": "No snapshot data found"})
+			fail(c, 404, "NO_DATA", "No snapshot data found")
 			return
 		}
 
@@ -145,48 +159,52 @@ func GetStockSnapshotHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 func GetStockTickHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := c.Param("code")
-		date := c.DefaultQuery("date", "")
+		date := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
 
 		// 检查 code 是否存在
 		queryStr := `SELECT symbol FROM subscribe WHERE symbol = $1`
 		row := pool.QueryRow(c.Request.Context(), queryStr, code)
 		var symbol string
 		if err := row.Scan(&symbol); err != nil {
-			c.JSON(404, gin.H{"error": "Stock code not found"})
+			fail(c, 404, "SYMBOL_NOT_FOUND", "Stock code not found")
 			return
 		}
 
-		tableName := symbol + "_Tick2"
+		symbol = strings.ToLower(strings.ReplaceAll(symbol, ".", "_"))
+		tableName := symbol + "_tick2"
 		// 用plv8解析jsonb，提取出tick_row中的字段，按分钟聚合
 		safeQueryStr := `
-		WITH ranked_data AS (
-			SELECT time_bucket('minute',created_at) minute,get_tick_row_price(tick_row)::numeric price,ROW_NUMBER() OVER (PARTITION BY time_bucket('minute',created_at) ORDER BY created_at DESC) rn,
-			cum_amount,
-			cum_volume
-			FROM ` + pgx.Identifier{tableName}.Sanitize() + `
-			WHERE time_bucket('day',created_at) = $1::date
-		)
-		SELECT minute,price,cum_amount/NULLIF(cum_volume, 0) avg_price,COALESCE(cum_volume - lag(cum_volume,1) over (order by minute),0) volume
-		FROM ranked_data
-		WHERE rn = 1
-		ORDER BY minute
+                WITH ranked_data AS (
+                        SELECT time_bucket('1 minute',created_at) as minute,get_tick_row_price(tick_row)::numeric as price,ROW_NUMBER() OVER (PARTITION BY time_bucket('1 minute',created_at) ORDER BY created_at DESC) as rn,
+                        get_tick_row_cum_amount(tick_row) as cum_amount,
+                        get_tick_row_cum_volume(tick_row) as cum_volume
+                        FROM` + pgx.Identifier{tableName}.Sanitize() + `
+                        WHERE created_at >= $1::date AND created_at < $1::date + INTERVAL '1 day'
+                )
+                SELECT minute,price,cum_amount/NULLIF(cum_volume, 0) as avg_price,cum_volume - lag(cum_volume,1,0) over (order by minute) as volume
+                FROM ranked_data
+                WHERE rn = 1
+                ORDER BY minute
 		`
 
+		// 调试看sql语句
+		log.Print(safeQueryStr)
 		rows, err := pool.Query(context.Background(), safeQueryStr, date)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to query database"})
+			fail(c, 500, "INTERNAL", "Failed to query database")
 			return
 		}
 		defer rows.Close()
 
 		var ticks []gin.H
 		for rows.Next() {
-			var minute string
-			var price float64
-			var avgPrice float64
-			var volume float64
+			var minute time.Time
+			var price string
+			var avgPrice string
+			var volume string
 			if err := rows.Scan(&minute, &price, &avgPrice, &volume); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to scan row"})
+				// 调试看错误信息
+				fail(c, 500, "INTERNAL", "Failed to scan row"+err.Error())
 				return
 			}
 			ticks = append(ticks, gin.H{
@@ -206,6 +224,7 @@ func GetStockTickHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // | ------ | ------ | ---- | ------------------------------------- |
 // | period | string | 否   | `1m` / `5m` / `15m` / `1d`，默认 `1d` |
 // | limit  | number | 否   | 返回根数，默认 30                     |
+// | date | string | 否   | 交易日 `YYYY-MM-DD HH:MM:SS`，缺省为当日 |
 // [
 //
 //	{
@@ -220,26 +239,28 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		code := c.Param("code")
 		period := c.DefaultQuery("period", "1d")
 		limit := c.DefaultQuery("limit", "30")
-
+		date := c.DefaultQuery("date", time.Now().Format("2006-01-02 15:04:05"))
 		// 检查 code 是否存在
 		queryStr := `SELECT symbol FROM subscribe WHERE symbol = $1`
 		row := pool.QueryRow(c.Request.Context(), queryStr, code)
 		var symbol string
 		if err := row.Scan(&symbol); err != nil {
-			c.JSON(404, gin.H{"error": "Stock code not found"})
+			fail(c, 404, "SYMBOL_NOT_FOUND", "Stock code not found")
 			return
 		}
 
-		tableName := symbol + "_Tick2"
+		symbol = strings.ToLower(strings.ReplaceAll(symbol, ".", "_"))
+		tableName := symbol + "_tick2"
 		safeQueryStr := `
 		WITH ranked_data AS (
-			SELECT time_bucket($1,created_at) period,price,ROW_NUMBER() OVER (PARTITION BY time_bucket($1,created_at) ORDER BY created_at DESC) rn,
-			sum(get_tick_row_cum_amount(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) cum_amount,
-			sum(get_tick_row_cum_volume(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) cum_volume,
-			max(price) over(PARTITION BY time_bucket($1,created_at)) high,
-			min(price) over(PARTITION BY time_bucket($1,created_at)) low,
-			first_value(price) over(PARTITION BY time_bucket($1,created_at) ORDER BY created_at ASC) open
+			SELECT time_bucket($1,created_at) as period,get_tick_row_price(tick_row)::numeric as price,ROW_NUMBER() OVER (PARTITION BY time_bucket($1,created_at) ORDER BY created_at DESC) as rn,
+			sum(get_tick_row_cum_amount(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) as cum_amount,
+			sum(get_tick_row_cum_volume(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) as cum_volume,
+			max(get_tick_row_price(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) as high,
+			min(get_tick_row_price(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at)) as low,
+			first_value(get_tick_row_price(tick_row)::numeric) over(PARTITION BY time_bucket($1,created_at) ORDER BY created_at ASC) as open
 			FROM ` + pgx.Identifier{tableName}.Sanitize() + `
+			WHERE created_at >= $3::timestamp - INTERVAL '7 day' AND created_at < $3::timestamp + INTERVAL '7 day'
 		)
 		SELECT period,open,price close,high,low,cum_volume volume,cum_amount amount
 		FROM ranked_data
@@ -248,25 +269,28 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		LIMIT $2
 		`
 
-		rows, err := pool.Query(context.Background(), safeQueryStr, period, limit)
+		// 调试看sql语句
+		log.Print(safeQueryStr)
+		rows, err := pool.Query(context.Background(), safeQueryStr, period, limit, date)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to query database"})
+			fail(c, 500, "INTERNAL", "Failed to query database")
 			return
 		}
 		defer rows.Close()
 
 		limitNum, err := strconv.Atoi(limit)
 		if err != nil || limitNum <= 0 {
-			c.JSON(400, gin.H{"error": "Invalid limit parameter"})
+			fail(c, 400, "INVALID_PARAM", "Invalid limit parameter")
 			return
 		}
 
 		klines := make([]gin.H, 0, limitNum)
 		for rows.Next() {
-			var period string
-			var open, close, high, low, volume, amount float64
+			var period time.Time
+			var open, close, high, low, volume, amount string
 			if err := rows.Scan(&period, &open, &close, &high, &low, &volume, &amount); err != nil {
-				c.JSON(500, gin.H{"error": "Failed to scan row"})
+				// 调试看错误信息
+				fail(c, 500, "INTERNAL", "Failed to scan row"+err.Error())
 				return
 			}
 			klines = append(klines, gin.H{
@@ -286,5 +310,37 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		c.JSON(200, klines)
+	}
+}
+
+// POST /register
+// { "username": "alice", "password": "secret123" }
+// 201 { "code": 201 }
+func RegisterHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Username string `json:"username" binding:"required"`
+			Password string `json:"password" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, 400, "INVALID_PARAM", "Invalid request body")
+			return
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			fail(c, 500, "INTERNAL", "Failed to hash password")
+			return
+		}
+
+		queryStr := `INSERT INTO users (username, password, role) VALUES ($1, $2, $3)`
+		_, err = pool.Exec(c.Request.Context(), queryStr, req.Username, string(hashedPassword), "user")
+		if err != nil {
+			fail(c, 500, "INTERNAL", "Failed to register user")
+			return
+		}
+
+		// 不返回 id/username:前端注册后只提示成功再切回登录,拿不到也用不上
+		c.JSON(201, gin.H{"code": 201})
 	}
 }

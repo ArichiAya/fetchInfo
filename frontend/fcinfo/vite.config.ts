@@ -1,9 +1,19 @@
+import type { IncomingMessage } from 'node:http'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+
+/**
+ * /login 和 /register 既是 SPA 路由又是后端接口，而 Vite 的代理是按前缀匹配的。
+ * 浏览器直接访问 /login（刷新页面、手输网址）是一次 Accept: text/html 的 GET，
+ * 不拦的话会被整个甩给后端，SPA 根本加载不出来。
+ * 这里把 HTML 导航放行到 index.html，只让 POST 的 API 调用走代理。
+ */
+const bypassHtmlNavigation = (req: IncomingMessage) =>
+  req.headers.accept?.includes('text/html') ? '/index.html' : undefined
 
 export default defineConfig(({ mode }) => {
   // 后端地址：默认指向 analysis/cmd/server（端口 8555，见 backend/analysis/cmd/server/main.go）
@@ -46,10 +56,18 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true
         },
-        // 登录发 token 的接口在 /api 之外（backend/analysis/cmd/server 的 router.POST("/login")）
+        // 登录接口在 /api 之外（backend/analysis/cmd/server 的 router.POST("/login")），
+        // 但同时又是前端的 /login 路由，所以要按 GET/POST 分流
         '/login': {
           target: apiTarget,
-          changeOrigin: true
+          changeOrigin: true,
+          bypass: bypassHtmlNavigation
+        },
+        // 注册与 /login 平级，同样是接口 + 避免直接访问时被代理吞掉
+        '/register': {
+          target: apiTarget,
+          changeOrigin: true,
+          bypass: bypassHtmlNavigation
         }
       }
     }

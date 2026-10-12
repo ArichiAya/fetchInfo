@@ -8,15 +8,16 @@ import KLineChart from './charts/KLineChart.vue'
 import PositionChart from './charts/PositionChart.vue'
 import PositionTable from './PositionTable.vue'
 import type {
-  DataSourceOption,
   KLineDay,
   KpiItem,
   PositionItem,
   Snapshot,
+  StockSymbol,
   SubscriptionItem,
   TickPoint
 } from '@/types/stock'
 import { ApiRequestError } from '@/api/request'
+import { logout } from '@/api/auth'
 import { fetchKLineData, fetchSnapshot, fetchTickData, searchStocks } from '@/api/market'
 import {
   fetchPositions,
@@ -48,29 +49,40 @@ const navItems = ['首页', '热点', '其他']
 // ---------- 签到日期 ----------
 const checkinDate = ref(todayISO())
 
-// ---------- 数据来源（纯前端状态，不参与后端取数） ----------
-const DATA_SOURCES: DataSourceOption[] = [
-  { label: 'API 接口', value: 'api' },
-  { label: '数据库', value: 'db' },
-  { label: 'CSV 文件', value: 'csv' }
-]
-const dataSource = ref('api')
+// ---------- 退出登录 ----------
+const router = useRouter()
+
+function handleLogout() {
+  logout()
+  router.replace({ name: 'login' })
+}
 
 // ---------- 行情标签页 ----------
 const activeTab = ref('tick')
 
+// ---------- 查看日期 / K线周期 ----------
+/** 查看的交易日：分时按天取，K线以这天为 ±7 天窗口的中心 */
+const viewDate = ref(todayISO())
+const isToday = computed(() => viewDate.value === todayISO())
+
+/** K线周期，在图上滚轮切换 */
+const KLINE_PERIODS = ['1m', '5m', '15m', '1d']
+const klinePeriod = ref('1d')
+
 // ---------- 页面数据 ----------
 const loading = ref(true)
 const subscriptions = ref<SubscriptionItem[]>([])
-const currentCode = ref('')
+/**
+ * 正在查看的标的。
+ * 与 subscriptions（自选列表）无关 —— 直接输入代码就能看，不需要先订阅。
+ */
+const current = ref<StockSymbol | null>(null)
+const currentCode = computed(() => current.value?.code ?? '')
 const snapshot = ref<Snapshot | null>(null)
 const tickData = ref<TickPoint[]>([])
 const klineData = ref<KLineDay[]>([])
 const rawPositions = ref<PositionItem[]>([])
 
-const currentStock = computed(() =>
-  subscriptions.value.find((s) => s.code === currentCode.value)
-)
 const positionsWithValue = computed(() => calcPositionValue(rawPositions.value))
 
 // KPI 卡片：后端只给数值，文案在这里拼
@@ -117,35 +129,49 @@ function reportError(err: unknown, fallback: string) {
 }
 
 // ---------- 拉数 ----------
-async function loadRealtime(signal?: AbortSignal) {
+async function loadSnapshot(signal?: AbortSignal) {
   const code = currentCode.value
   if (!code) return
-  const [snap, ticks] = await Promise.all([
-    fetchSnapshot(code, signal),
-    fetchTickData(code, undefined, signal)
-  ])
+  const snap = await fetchSnapshot(code, signal)
   // 请求期间切了股票，这次结果作废，别覆盖新股票的数据
   if (code !== currentCode.value) return
   snapshot.value = snap
-  tickData.value = ticks
+}
+
+async function loadTick(signal?: AbortSignal) {
+  const code = currentCode.value
+  if (!code) return
+  const date = viewDate.value
+  const ticks = await fetchTickData(code, date, signal)
+  if (code !== currentCode.value || date !== viewDate.value) return
+  // 后端在没有数据时返回的是 null（nil slice），兜一下免得图表炸掉
+  tickData.value = ticks ?? []
 }
 
 async function loadKline(signal?: AbortSignal) {
   const code = currentCode.value
   if (!code) return
-  const data = await fetchKLineData(code, '1d', 30, signal)
-  if (code !== currentCode.value) return
-  klineData.value = data
+  const period = klinePeriod.value
+  const date = viewDate.value
+  // kline 的 date 是 `YYYY-MM-DD HH:MM:SS`，而且是 ±7 天窗口的中心；
+  // tick 的 date 是 `YYYY-MM-DD`。两个格式不一样，别直接共用。
+  const data = await fetchKLineData(code, period, 30, `${date} 00:00:00`, signal)
+  if (code !== currentCode.value || period !== klinePeriod.value || date !== viewDate.value) {
+    return
+  }
+  klineData.value = data ?? []
 }
 
 async function loadPositions(signal?: AbortSignal) {
   rawPositions.value = await fetchPositions(signal)
 }
 
-// 分时与快照要求实时，日K 与持仓变化慢
+// 快照要求实时，日K 与持仓变化慢
 const realtimePolling = usePolling(async (signal) => {
   try {
-    await loadRealtime(signal)
+    await loadSnapshot(signal)
+    // 只有看当天时才跟着刷分时 —— 历史某天的曲线不会再变
+    if (isToday.value) await loadTick(signal)
     errorAnnounced = false
   } catch (err) {
     if (!signal.aborted) reportError(err, '行情刷新失败')
@@ -161,9 +187,44 @@ const slowPolling = usePolling(async (signal) => {
   }
 }, 60000)
 
-// ---------- 订阅 ----------
+// ---------- 查看 / 订阅 ----------
+// 两件事是分开的：查看只切当前标的，订阅只往自选列表里加，互不影响。
 const stockCode = ref('')
 
+/** 把输入框里的代码或名称解析成一个标的 */
+async function resolveStock(keyword: string): Promise<StockSymbol | null> {
+  const items = await searchStocks(keyword)
+  if (!items.length) {
+    ElMessage.warning(`未找到「${keyword}」`)
+    return null
+  }
+  const target = items[0]
+  if (items.length > 1) {
+    ElMessage.info(`匹配到 ${items.length} 条，取 ${target.name}（${target.code}）`)
+  }
+  return target
+}
+
+/** 查看：切到这个标的看行情 */
+async function handleView() {
+  const keyword = stockCode.value.trim()
+  if (!keyword) {
+    ElMessage.warning('请输入股票代码或名称')
+    return
+  }
+  try {
+    const target = await resolveStock(keyword)
+    if (target) await selectStock(target)
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.code === 'SYMBOL_NOT_FOUND') {
+      ElMessage.warning(`未找到「${keyword}」`)
+      return
+    }
+    reportError(err, '加载行情失败')
+  }
+}
+
+/** 订阅：加进自选列表，不改变当前正在看的标的 */
 async function handleSubscribe() {
   const keyword = stockCode.value.trim()
   if (!keyword) {
@@ -171,26 +232,16 @@ async function handleSubscribe() {
     return
   }
   try {
-    // 订阅体只收 code，所以先用搜索把"代码或名称"解析成代码
-    const items = await searchStocks(keyword)
-    if (!items.length) {
-      ElMessage.warning(`未找到「${keyword}」`)
-      return
-    }
-    const target = items[0]
-    if (items.length > 1) {
-      ElMessage.info(`匹配到 ${items.length} 条，已订阅 ${target.name}（${target.code}）`)
-    }
+    const target = await resolveStock(keyword)
+    if (!target) return
 
     const item = await subscribeStock(target.code)
     subscriptions.value.push(item)
-    stockCode.value = ''
-    if (!currentCode.value) currentCode.value = item.code
     ElMessage.success(`已订阅 ${item.name}（${item.code}）`)
     errorAnnounced = false
   } catch (err) {
     if (err instanceof ApiRequestError && err.code === 'ALREADY_SUBSCRIBED') {
-      ElMessage.info(`${keyword} 已在订阅列表中`)
+      ElMessage.info(`${keyword} 已在自选列表中`)
       return
     }
     if (err instanceof ApiRequestError && err.code === 'SYMBOL_NOT_FOUND') {
@@ -205,12 +256,6 @@ async function handleUnsubscribe(code: string) {
   try {
     await unsubscribeStock(code)
     subscriptions.value = subscriptions.value.filter((s) => s.code !== code)
-    if (currentCode.value === code) {
-      currentCode.value = subscriptions.value[0]?.code ?? ''
-      snapshot.value = null
-      tickData.value = []
-      klineData.value = []
-    }
   } catch (err) {
     if (err instanceof ApiRequestError && err.code === 'SUBSCRIPTION_NOT_FOUND') {
       subscriptions.value = subscriptions.value.filter((s) => s.code !== code)
@@ -220,17 +265,46 @@ async function handleUnsubscribe(code: string) {
   }
 }
 
-async function selectStock(code: string) {
-  if (code === currentCode.value) return
-  currentCode.value = code
+/** 切换正在查看的标的，并立刻拉一轮，不用等下一次轮询 */
+async function selectStock(stock: StockSymbol) {
+  if (stock.code === currentCode.value) return
+  current.value = stock
   snapshot.value = null
   tickData.value = []
   klineData.value = []
   try {
-    await Promise.all([loadRealtime(), loadKline()])
+    await Promise.all([loadSnapshot(), loadTick(), loadKline()])
     errorAnnounced = false
   } catch (err) {
     reportError(err, '加载行情失败')
+  }
+}
+
+/** 换查看日期：分时和K线都要重拉（快照永远是"此刻"，不受影响） */
+async function handleDateChange() {
+  tickData.value = []
+  klineData.value = []
+  try {
+    await Promise.all([loadTick(), loadKline()])
+    errorAnnounced = false
+  } catch (err) {
+    reportError(err, '加载失败')
+  }
+}
+
+/** 滚轮换 K 线周期：-1 更短、+1 更长，到头就不动 */
+async function handlePeriodStep(step: number) {
+  const i = KLINE_PERIODS.indexOf(klinePeriod.value)
+  const next = KLINE_PERIODS[Math.min(Math.max(i + step, 0), KLINE_PERIODS.length - 1)]
+  if (next === klinePeriod.value) return
+
+  klinePeriod.value = next
+  klineData.value = []
+  try {
+    await loadKline()
+    errorAnnounced = false
+  } catch (err) {
+    reportError(err, '加载K线失败')
   }
 }
 
@@ -238,7 +312,9 @@ async function selectStock(code: string) {
 onMounted(async () => {
   try {
     subscriptions.value = await fetchSubscriptions()
-    currentCode.value = subscriptions.value[0]?.code ?? ''
+    // 有自选就先看第一只；没有就等用户输入代码，别硬塞一个
+    const first = subscriptions.value[0]
+    if (first) current.value = { code: first.code, name: first.name }
     errorAnnounced = false
   } catch (err) {
     reportError(err, '加载订阅列表失败')
@@ -284,6 +360,10 @@ onMounted(async () => {
         </el-col>
 
         <el-col :span="3">
+          <el-button round text @click="handleLogout">退出</el-button>
+        </el-col>
+
+        <el-col :span="3">
           <el-switch v-model="isDark" active-text="暗" inactive-text="亮" @change="toggleTheme" />
         </el-col>
       </el-row>
@@ -310,10 +390,10 @@ onMounted(async () => {
       <template #header>
         <div class="card-header">
           <span class="card-title">
-            <template v-if="currentStock">
-              数据 · {{ currentStock.name }}（{{ currentStock.code }}）
+            <template v-if="current">
+              数据 · {{ current.name }}（{{ current.code }}）
             </template>
-            <template v-else>数据 · 暂无订阅</template>
+            <template v-else>数据 · 输入股票代码查看</template>
           </span>
           <div class="subscribed-tags">
             <el-tag
@@ -324,7 +404,7 @@ onMounted(async () => {
               size="small"
               class="stock-tag"
               :effect="sub.code === currentCode ? 'dark' : 'plain'"
-              @click="selectStock(sub.code)"
+              @click="selectStock(sub)"
               @close="handleUnsubscribe(sub.code)"
             >
               {{ sub.name }}
@@ -333,43 +413,51 @@ onMounted(async () => {
         </div>
       </template>
 
-      <!-- 工具条：数据来源 + 订阅 -->
+      <!-- 工具条：查看行情 / 加入自选（两件独立的事） -->
       <el-row :gutter="12" align="middle" class="toolbar">
-        <el-col :xs="24" :sm="8">
-          <el-select v-model="dataSource" placeholder="数据来源" style="width: 100%">
-            <el-option
-              v-for="opt in DATA_SOURCES"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-col>
-
         <el-col :xs="24" :sm="12">
           <el-input
             v-model="stockCode"
             placeholder="输入股票代码或名称（如 000001 / 贵州茅台）"
             :prefix-icon="Search"
             clearable
-            @keyup.enter="handleSubscribe"
+            @keyup.enter="handleView"
           />
         </el-col>
 
-        <el-col :xs="24" :sm="4">
-          <el-button type="primary" round style="width: 100%" @click="handleSubscribe">
-            订阅
+        <el-col :xs="12" :sm="6">
+          <el-button type="primary" round style="width: 100%" @click="handleView">
+            查看
           </el-button>
+        </el-col>
+
+        <el-col :xs="12" :sm="6">
+          <el-button round style="width: 100%" @click="handleSubscribe">订阅</el-button>
         </el-col>
       </el-row>
 
+      <!-- 还没选标的时不渲染图表，给个提示 -->
+      <div v-if="!current" class="empty-hint">输入股票代码后点「查看」加载行情</div>
+
       <!-- 行情标签页 -->
-      <el-tabs v-model="activeTab" class="chart-tabs">
+      <el-tabs v-else v-model="activeTab" class="chart-tabs">
         <el-tab-pane label="tick" name="tick">
           <el-row :gutter="12">
             <el-col :xs="24" :lg="12">
               <div class="chart-panel">
-                <h4>分时走势</h4>
+                <div class="panel-header">
+                  <h4>分时走势</h4>
+                  <el-date-picker
+                    v-model="viewDate"
+                    type="date"
+                    placeholder="交易日"
+                    value-format="YYYY-MM-DD"
+                    :clearable="false"
+                    size="small"
+                    style="width: 148px"
+                    @change="handleDateChange"
+                  />
+                </div>
                 <TickChart :data="tickData" :dark="isDark" />
               </div>
             </el-col>
@@ -383,12 +471,33 @@ onMounted(async () => {
           </el-row>
         </el-tab-pane>
 
-        <el-tab-pane label="日K" name="daily">
+        <el-tab-pane label="K线" name="daily">
           <el-row :gutter="12">
             <el-col :xs="24" :lg="12">
               <div class="chart-panel">
-                <h4>日K走势</h4>
-                <KLineChart :data="klineData" :dark="isDark" />
+                <div class="panel-header">
+                  <h4>K线走势 · {{ klinePeriod }}</h4>
+                  <div class="panel-tools">
+                    <span class="panel-hint">滚轮切换周期</span>
+                    <!-- 和分时面板绑同一个 viewDate，改哪边都生效 -->
+                    <el-date-picker
+                      v-model="viewDate"
+                      type="date"
+                      placeholder="交易日"
+                      value-format="YYYY-MM-DD"
+                      :clearable="false"
+                      size="small"
+                      style="width: 148px"
+                      @change="handleDateChange"
+                    />
+                  </div>
+                </div>
+                <KLineChart
+                  :data="klineData"
+                  :dark="isDark"
+                  :period="klinePeriod"
+                  @step-period="handlePeriodStep"
+                />
               </div>
             </el-col>
             <el-col :xs="24" :lg="12">
@@ -503,6 +612,13 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
+.empty-hint {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 /* ======== 图表面板 ======== */
 .chart-tabs {
   margin-top: 8px;
@@ -520,5 +636,29 @@ onMounted(async () => {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+/* 标题右侧可以挂日期选择器 / 提示文字 */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-header h4 {
+  margin: 0;
+}
+
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-hint {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>

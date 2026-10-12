@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import MainPage from './components/MainPage.vue';
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
-  <MainPage />
+  <RouterView />
 </template>

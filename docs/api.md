@@ -6,14 +6,14 @@
 
 | 项 | 约定 |
 | --- | --- |
-| base | `/api`，按服务分前缀：行情查询 `/api/market/*`、订阅与持仓 `/api/business/*` |
+| base | `/api`，按服务分前缀：行情查询 `/api/market/*`、订阅与持仓 `/api/business/*`；鉴权的 `/login`、`/register` 挂在**根路径**下 |
 | 时间 | 一律 ISO 8601 带时区，如 `2026-08-13T14:56:03+08:00`（A股时区 `Asia/Shanghai`），展示格式化由前端负责 |
 | 数值 | 后端只返回原始数值，不下发 `4.82亿`、`+2.30%` 这类成品文案 |
 | 错误体 | `{ "error": { "code": "...", "message": "..." } }` |
 | 实时性 | 分时与快照 5s 轮询，日K 与持仓低频刷新；V1 全量返回，`since` 增量参数留 V2 |
-| 鉴权 | 未定。接入后前端需在 `src/api/request.ts` 补 token，并处理 401 |
+| 鉴权 | JWT。`POST /login` 换 token（**这两个接口不在 `/api` 前缀下**，见第三节），之后所有 `/api/*` 带 `Authorization: Bearer <token>` |
 
-前端实现：`src/api/request.ts`（统一请求层）、`src/api/market.ts`、`src/api/business.ts`。
+前端实现：`src/api/request.ts`（统一请求层）、`src/api/market.ts`、`src/api/business.ts`、`src/api/auth.ts`（登录/注册）。
 
 ---
 
@@ -115,6 +115,9 @@ GET /api/market/stocks/{code}/kline?period=1d&limit=30
 | --- | --- | --- | --- |
 | period | string | 否 | `1m` / `5m` / `15m` / `1d`，默认 `1d` |
 | limit | number | 否 | 返回根数，默认 30 |
+| date | string | 否 | `YYYY-MM-DD HH:MM:SS`，缺省为当前时间。**注意格式与 `/tick` 的 `YYYY-MM-DD` 不同** |
+
+> ⚠️ 后端的查询条件是 `created_at` 落在 **`date ± 7 天`** 的窗口里（不是"从 date 往前取"）。所以 `period=1d` 时最多只能拿到窗口内约 11 个交易日的日K，**不再是 30 根**；分钟级周期（`1m`/`5m`/`15m`）在这个窗口里取最近 `limit` 根是合理的。要让日K 能往回看更久，得把这个窗口放宽或者改成真正的区间参数。
 
 **响应** `200`
 
@@ -163,7 +166,9 @@ POST /api/business/subscriptions
 { "code": "000001" }
 ```
 
-请求体**只有 `code`**：数据来源由后端按代码决定，前端不参与选源（页面上「数据来源」下拉是纯前端状态，不入库）。
+请求体**只有 `code`**：取数路径由后端按代码决定，前端不参与选源（页面上原有的「数据来源」下拉已删掉，只有 API 一条路）。
+
+订阅与查看是**两件事**：输入代码点「查看」只是切换当前展示的标的，会不会写进自选列表取决于用户有没有点「订阅」。
 
 **响应** `201` — 返回订阅项，结构同列表元素。
 
@@ -195,7 +200,66 @@ GET /api/business/positions
 
 ---
 
-## 三、错误码
+## 三、鉴权服务（根路径，无 `/api` 前缀）
+
+这两个接口是 gin-jwt 自带的 handler，**响应体形状与本文其余部分不一致**，单独说明。
+
+### 9. 登录
+
+```
+POST /login
+{ "username": "alice", "password": "secret123" }
+```
+
+**响应** `200`
+
+```json
+{ "code": 200, "token": "<jwt>", "expire": "2026-10-12T15:04:05+08:00" }
+```
+
+`token` 是**裸 token，不带 `Bearer ` 前缀**，前端存下来后在请求头里拼成 `Authorization: Bearer <token>`。
+
+**失败** `401`
+
+```json
+{ "code": 401, "message": "incorrect Username or Password" }
+```
+
+> ⚠️ 登录/注册用的是 `{ code, token, expire }` / `{ code, message }`，**不是上面约定的 `{ error: { code, message } }`** —— 这是 gin-jwt 的默认行为。前端 `request.ts` 的解析器两种都认，但**新接口不要再照着这个形状做**。
+
+### 10. 注册
+
+```
+POST /register
+{ "username": "alice", "password": "secret123" }
+```
+
+**响应** `201` —— 不回 id / username，前端拿到后用不上
+
+```json
+{ "code": 201 }
+```
+
+**失败**
+
+| HTTP | 场景 |
+| --- | --- |
+| `400` `INVALID_PARAM` | 用户名或密码为空（gin 的 `binding:"required"`） |
+| `409` | 用户名已存在 |
+
+> 409 后端尚未实现：`RegisterHandler` 目前不检查用户名重复，直接 INSERT。`users.username` 也没有唯一约束，所以现在还拦不住。要真正生效得先加唯一索引再在 handler 里判。此外前端校验的「密码至少 6 位」后端也没有对应校验，只是前端 UX。
+
+**注册不返回 token** —— 前端注册成功后切回登录页，让用户再走一次登录。
+
+写入 `users` 表的约束（表结构见 `README.md:612`）：
+
+- `password` 必须写 **bcrypt** 哈希（`bcrypt.GenerateFromPassword`），因为登录侧用的是 `bcrypt.CompareHashAndPassword`。README 里那句 `sha256+salt` 是过期描述
+- 新用户的 `role` 给 `user`。**后端需同步把 `authorizator` 从只认 `role == "admin"` 放宽成"任意已登录用户"**，否则注册出来的账号能登录但调 `/api/*` 全 403
+- `username` 在表里**没有唯一约束**，"用户名已存在"得后端自己查一次再决定返 409
+
+---
+
+## 四、错误码
 
 | HTTP | code | 场景 | 前端处置 |
 | --- | --- | --- | --- |
@@ -204,14 +268,17 @@ GET /api/business/positions
 | 404 | `SUBSCRIPTION_NOT_FOUND` | 取消不存在的订阅 | 静默刷新 |
 | 409 | `ALREADY_SUBSCRIBED` | 重复订阅 | info「已在订阅列表中」 |
 | 404 | `NO_DATA` | 该 symbol 无行情表 / 当日无数据 | 空态 |
-| 401 | `UNAUTHORIZED` | 未登录或 token 过期 | 跳登录 |
+| 401 | `UNAUTHORIZED` | 未登录或 token 过期 | 清 token + 跳登录 |
+| 403 | `FORBIDDEN` | 已登录但角色不够（后端 `authorizator` 目前只放行 admin） | 提示无权限 |
 | 500 | `INTERNAL` | 服务端异常 | error |
 
 前端统一由 `src/api/request.ts` 解析，抛 `ApiRequestError(status, code, message)`。
 
+> 例外：`/login`、`/register` 返回的是 `{ code, message }`（gin-jwt 的默认形状，见第三节）。`request.ts` 两种都认，但**只有这两个接口是例外**，新接口一律用上面的统一错误体。
+
 ---
 
-## 四、落地备注
+## 五、落地备注
 
 ### 表名规则未定（头号阻塞）
 
@@ -238,9 +305,37 @@ GET /api/business/positions
 
 因此上文的日K 与 `prevClose` **都走 `{symbol}_Tick2`**，不依赖 bar 链路。tick 链路是通的（ingestion → tick_stream → compute → `tick2.new` → persister）。
 
+### 已知的后端问题（联调阻塞）
+
+这三条前端绕不过去，必须后端改：
+
+1. **登录按 `id` 查，不是按 `username`** —— `backend/common/auth/auth.go` 里是
+   `SELECT id, username, password, role FROM users WHERE id=$1`，但绑定的是登录表单里的
+   `username` 字符串。结果只有纯数字用户名能登录成功，非数字会因类型转换直接报错，前端只看到 401。
+   **用户侧的表现是「刚注册的账号登不进去」。** 应改成 `WHERE username=$1`。
+2. **`authorizator` 只放行 `role == "admin"`** —— 非 admin 账号能登录，但所有 `/api/*` 返回 403。
+   登录响应里没有 role 字段，前端没法提前告知，只能在第一次业务请求吃到 403 时提示。
+3. **`identityHandler` 的 `claims["id"].(int)` 会 panic** —— JWT 经 JSON 往返后数字是 `float64`，
+   断言 `int` 失败 → panic → gin Recovery → **500 且 body 为空**，admin 也照样中。
+   修法一行：`int(claims[identityKey].(float64))`。
+
+排查命令（拿到 token 后打一个受保护接口）：
+
+```bash
+curl -i 'http://127.0.0.1:8555/api/market/stocks/search?keyword=1' \
+  -H 'Authorization: Bearer <token>'
+```
+
+500 空 body 就是第 3 条，403 是第 2 条，401 是第 1 条。
+
+### 部署注意
+
+`/login`、`/register` 既是 SPA 路由又是后端接口。开发环境靠 `vite.config.ts` 里的 `bypass`
+按 `Accept: text/html` 分流，**生产环境同样要按方法分流**（例如 nginx 里 `GET /login` 交给
+`index.html`、`POST /login` 转发后端），否则刷新登录页会直接打到后端拿 404。
+
 ### 前端待办
 
-- `vite.config.ts` 未配 `/api` 代理，接入后端时需补
-- `src/mock/stockData.ts` 目前仍在为页面供数，后端就绪后替换为 `src/api` 调用
-- 轮询建议封装 `usePolling`，绑 `visibilitychange` 在标签页隐藏时暂停
-- 页面上的「数据来源」下拉对取数已无影响，考虑去掉或改语义（如导出格式）
+- `src/mock/stockData.ts` 已无人引用（MainPage 早就切到 API 了），可以删 —— 它现在唯一的副作用是改类型时会连带编译失败
+- `vite.config.ts` 的 `AutoImport` 里还留着 `imports: ['pinia']`，但项目没装 pinia —— 幽灵配置，建议去掉
+- 退出登录只清本地 token，后端的 JWT 仍然有效直到过期（1h）。要做服务端失效需要黑名单，V1 不做

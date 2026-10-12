@@ -42,6 +42,25 @@ const props = withDefaults(
   { period: '1d' }
 )
 
+const emit = defineEmits<{
+  /** 滚轮换周期：-1 = 更短周期，+1 = 更长周期 */
+  stepPeriod: [step: number]
+}>()
+
+/**
+ * 滚轮换周期。加 150ms 的锁，否则触控板惯性滚动会一口气跳完整个周期列表。
+ * 注意 dataZoom 的 zoomOnMouseWheel 也关掉了，滚轮不再用于缩放。
+ */
+let wheelLocked = false
+function onWheel(e: WheelEvent) {
+  if (wheelLocked) return
+  wheelLocked = true
+  setTimeout(() => {
+    wheelLocked = false
+  }, 150)
+  emit('stepPeriod', e.deltaY < 0 ? -1 : 1)
+}
+
 /** 时间轴标签：日K 只显示日期，分钟K 显示日期 + 时分 */
 function axisLabel(ts: string): string {
   const [date, time = ''] = ts.split('T')
@@ -146,7 +165,8 @@ const option = computed<EChartsCoreOption>(() => {
       }
     ],
     dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], start: 30, end: 100 },
+      // 滚轮留给"换周期"，不再用于缩放；缩放仍可用下面的滑块和拖拽
+      { type: 'inside', xAxisIndex: [0, 1], start: 30, end: 100, zoomOnMouseWheel: false },
       {
         type: 'slider',
         xAxisIndex: [0, 1],
@@ -208,7 +228,7 @@ useEChart(elRef, option)
 </script>
 
 <template>
-  <div ref="elRef" class="kline-chart" />
+  <div ref="elRef" class="kline-chart" @wheel.prevent="onWheel" />
 </template>
 
 <style scoped>

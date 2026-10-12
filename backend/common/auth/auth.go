@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
 	jwt "github.com/appleboy/gin-jwt/v2"
@@ -16,7 +17,12 @@ type login struct {
 	Password string `form:"password" json:"password" binding:"required"`
 }
 
-var identityKey = "id"
+var (
+	// identityKey 是 gin-jwt 的 IdentityKey,也是 claims 里存角色的键
+	identityKey = "role"
+	// userIdKey 是 claims 里存用户主键的键
+	userIdKey = "id"
+)
 
 // User demo
 type User struct {
@@ -92,7 +98,8 @@ func payloadFunc() func(data interface{}) jwt.MapClaims {
 	return func(data interface{}) jwt.MapClaims {
 		if v, ok := data.(*User); ok {
 			return jwt.MapClaims{
-				identityKey: v.UserId,
+				identityKey: v.role,
+				userIdKey:   v.UserId,
 			}
 		}
 		return jwt.MapClaims{}
@@ -102,9 +109,16 @@ func payloadFunc() func(data interface{}) jwt.MapClaims {
 func identityHandler() func(c *gin.Context) interface{} {
 	return func(c *gin.Context) interface{} {
 		claims := jwt.ExtractClaims(c)
-		return &User{
-			UserId: claims[identityKey].(int),
+		user := &User{}
+		if role, ok := claims[identityKey].(string); ok {
+			user.role = role
 		}
+		// JWT 经 JSON 往返后数字是 float64,直接断言 int 会 panic,
+		// 而 gin 的 Recovery 会把它变成 500 空 body —— 每个请求都中。
+		if id, ok := claims[userIdKey].(float64); ok {
+			user.UserId = int(id)
+		}
+		return user
 	}
 }
 
@@ -114,14 +128,13 @@ func authenticator(pool *pgxpool.Pool) func(c *gin.Context) (interface{}, error)
 		if err := c.ShouldBind(&loginVals); err != nil {
 			return "", jwt.ErrMissingLoginValues
 		}
-		userID := loginVals.Username
+		username := loginVals.Username
 		password := loginVals.Password
 
 		// 连接pgsql数据库，取出用户信息进行验证
-		queryStr := "SELECT id, username, password, role FROM users WHERE id=$1"
-		row := pool.QueryRow(context.Background(), queryStr, userID)
+		queryStr := "SELECT id, username, password, role FROM users WHERE username=$1"
+		row := pool.QueryRow(context.Background(), queryStr, username)
 		var id int
-		var username string
 		var hashedPassword string
 		var role string
 		err := row.Scan(&id, &username, &hashedPassword, &role)
@@ -156,10 +169,11 @@ func authenticator(pool *pgxpool.Pool) func(c *gin.Context) (interface{}, error)
 
 func authorizator() func(data interface{}, c *gin.Context) bool {
 	return func(data interface{}, c *gin.Context) bool {
-		if v, ok := data.(*User); ok && v.role == "admin" {
-			return true
+		if _, ok := data.(*User); !ok {
+			return false
 		}
-		return false
+		// 查redis看用户是否登出
+		return true
 	}
 }
 
@@ -189,3 +203,25 @@ func unauthorized() func(c *gin.Context, code int, message string) {
 // 		"text":     "Hello World.",
 // 	})
 // }
+
+// 自定义角色校验中间件
+func RoleAuth(requiredRole string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// gin-jwt 解析成功后，会将 claims 或 user 存入上下文
+		claims := jwt.ExtractClaims(c)
+
+		role, ok := claims[identityKey].(string)
+		if !ok || role != requiredRole {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"code":    "FORBIDDEN",
+					"message": "permission denied",
+				},
+			})
+			c.Abort() // 终止后续请求
+			return
+		}
+
+		c.Next()
+	}
+}

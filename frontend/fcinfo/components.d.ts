@@ -15,6 +15,8 @@ declare module 'vue' {
     ElCard: typeof import('element-plus/es')['ElCard']
     ElCol: typeof import('element-plus/es')['ElCol']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
+    ElForm: typeof import('element-plus/es')['ElForm']
+    ElFormItem: typeof import('element-plus/es')['ElFormItem']
     ElInput: typeof import('element-plus/es')['ElInput']
     ElOption: typeof import('element-plus/es')['ElOption']
     ElRow: typeof import('element-plus/es')['ElRow']
@@ -30,6 +32,8 @@ declare module 'vue' {
     MainPage: typeof import('./src/components/MainPage.vue')['default']
     PositionChart: typeof import('./src/components/charts/PositionChart.vue')['default']
     PositionTable: typeof import('./src/components/PositionTable.vue')['default']
+    RouterLink: typeof import('vue-router')['RouterLink']
+    RouterView: typeof import('vue-router')['RouterView']
     TickChart: typeof import('./src/components/charts/TickChart.vue')['default']
   }
   export interface GlobalDirectives {

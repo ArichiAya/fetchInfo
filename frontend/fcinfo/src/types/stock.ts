@@ -119,12 +119,6 @@ export interface KpiItem {
   hero?: boolean
 }
 
-/** 数据来源选项（纯前端状态，不参与后端取数） */
-export interface DataSourceOption {
-  label: string
-  value: string
-}
-
 // ---------- 错误 ----------
 
 /** 后端统一错误体：{ "error": { "code": "...", "message": "..." } } */

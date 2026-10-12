@@ -9,8 +9,7 @@ import type {
   PositionItem,
   SubscriptionItem,
   KpiItem,
-  StockSymbol,
-  DataSourceOption
+  StockSymbol
 } from '@/types/stock'
 
 // ---------- 当前主股票 ----------
@@ -119,13 +118,6 @@ export const KPI_ITEMS: KpiItem[] = [
   { label: '今日最高', value: '12.92' },
   { label: '成交额', value: '4.82亿', delta: '+8.1% vs 昨日', up: true },
   { label: '持仓市值', value: '¥460,220', delta: '+¥2,860 (0.63%)', up: true }
-]
-
-// ---------- 数据来源选项 ----------
-export const DATA_SOURCES: DataSourceOption[] = [
-  { label: 'API 接口', value: 'api' },
-  { label: '数据库', value: 'db' },
-  { label: 'CSV 文件', value: 'csv' }
 ]
 
 // ---------- 导出写死的数据 ----------
