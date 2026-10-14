@@ -27,10 +27,20 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const (
-	databaseURL string = "postgres://iiot_admin:changeme_please_2024@192.168.80.131:5432/mktdata"
-	port        string = "8556"
+var (
+	databaseURL string
+	port        string
 )
+
+func init() {
+	if err := godotenv.Load(".env"); err != nil {
+		log.Printf("load .env error: %v", err)
+		time.Sleep(1 * time.Second)
+		os.Exit(1)
+	}
+	databaseURL = os.Getenv("databaseURL")
+	port = os.Getenv("port")
+}
 
 func main() {
 	// 设置日志输出到文件和标准输出
@@ -43,10 +53,6 @@ func main() {
 	// 组合文件和标准输出
 	multiWriter := io.MultiWriter(os.Stdout, file)
 	log.SetOutput(multiWriter)
-
-	if err := godotenv.Load(".env"); err != nil {
-		log.Println("load .env error:", err)
-	}
 
 	jwtKey := os.Getenv("jwt_key")
 	if jwtKey == "" {

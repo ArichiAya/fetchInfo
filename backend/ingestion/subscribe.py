@@ -18,7 +18,7 @@ load_dotenv()
 STRATEGY_ID = os.getenv("STRATEGY_ID")
 TOKEN = os.getenv('JJ_TOKEN')
 CODES = ['SHSE.600519']
-NATS_URL = 'nats://192.168.80.131:4222'
+NATS_URL = os.getenv("NATS_URL")
 
 QUEUE_MAXSIZE = 10000
 STOP = object()  # 队列中放入这个对象表示停止
@@ -202,8 +202,8 @@ def main():
         filename='subscribe.py',
         mode=MODE_BACKTEST,
         token=TOKEN,
-        backtest_start_time='2026-10-09 09:30:00',
-        backtest_end_time='2026-10-09 15:00:00',
+        backtest_start_time='2026-10-12 09:30:00',
+        backtest_end_time='2026-10-12 15:00:00',
         backtest_adjust=ADJUST_PREV,
         backtest_initial_cash=10000000,
         backtest_commission_ratio=0.0001,

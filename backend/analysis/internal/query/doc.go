@@ -14,8 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// const databaseURL string = "postgres://iiot_admin:changeme_please_2024@192.168.80.131:5432/mktdata"
-
 // func CacheInit() (*sync.Map, context.CancelFunc) {
 // 	// 获取存在的symbol列表,用于查询时验证symbol合法性,避免无效查询。
 // 	// 1. 连接 TimescaleDB

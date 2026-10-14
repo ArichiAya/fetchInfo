@@ -25,13 +25,12 @@ import (
 	"github.com/ArichiAya/fetch-info/common/msg"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	kafkaBroker1          string = "192.168.80.131:9092"
-	databaseURL           string = "postgres://iiot_admin:changeme_please_2024@192.168.80.131:5432/mktdata"
 	consumerGroup         string = "timescale-writer"
 	exit                  int    = 0
 	faltalError           int    = 1
@@ -42,6 +41,11 @@ const (
 	barTableColumeAmount         = 4
 )
 
+var (
+	kafkaBroker1 string
+	databaseURL  string
+)
+
 var topics = []string{kafkax.TopicTick, kafkax.TopicBar}
 
 type (
@@ -49,6 +53,16 @@ type (
 	statusCodeSender   chan<- int
 	statusCodeReciever <-chan int
 )
+
+func init() {
+	if err := godotenv.Load(".env"); err != nil {
+		log.Printf("load .env error: %v", err)
+		time.Sleep(1 * time.Second)
+		os.Exit(1)
+	}
+	kafkaBroker1 = os.Getenv("kafkaBroker1")
+	databaseURL = os.Getenv("databaseURL")
+}
 
 func main() {
 	// 设置日志输出到文件和标准输出

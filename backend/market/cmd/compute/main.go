@@ -17,16 +17,27 @@ import (
 	"github.com/ArichiAya/fetch-info/common/natsx"
 	"github.com/ArichiAya/fetch-info/market/internal/indicator"
 	"github.com/ArichiAya/fetch-info/market/internal/model"
+	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 )
 
-const (
-	natsServerURL string = "nats://192.168.80.131:4222"
-	kafkaBroker1  string = "192.168.80.131:9092"
+var (
+	natsServerURL string
+	kafkaBroker1  string
 )
+
+func init() {
+	if err := godotenv.Load(".env"); err != nil {
+		log.Printf("load .env error: %v", err)
+		time.Sleep(1 * time.Second)
+		os.Exit(1)
+	}
+	natsServerURL = os.Getenv("natsServerURL")
+	kafkaBroker1 = os.Getenv("kafkaBroker1")
+}
 
 func main() {
 	// 设置日志输出到文件和标准输出
