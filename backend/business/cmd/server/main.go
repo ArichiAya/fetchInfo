@@ -2,12 +2,8 @@
 //
 // 数据存储:
 //   - PostgreSQL:工单、人员、策略条件配置等业务数据
-//   - Redis:登录态缓存(session/黑名单,带 TTL)、热点数据
-//
-// 待实现清单:
-//  1. internal/auth:登录签发 JWT,Redis 缓存登录态
-//  2. internal/workorder / personnel:PostgreSQL CRUD
-//  3. internal/httpapi:路由与中间件
+//   - Redis:登录态缓存(session/黑名单,带 TTL)、热点数据(暂定)
+
 package main
 
 import (
