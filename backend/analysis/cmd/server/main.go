@@ -4,7 +4,7 @@
 //   - internal/query   :从 TimescaleDB 只读查询 bar/指标(暂时没有公共使用部分)
 //   - internal/report  :生成数据报表(取消)
 //   - internal/trigger :分析请求满足条件时,触发交易(复用 market/internal/strategy 的求值逻辑)
-//   - internal/httpapi :HTTP 路由与 handler,鉴权走 business/auth 下发的 token
+//   - internal/httpapi :HTTP 路由与 handler,鉴权走 auth 下发的 token
 
 package main
 
