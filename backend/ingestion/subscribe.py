@@ -8,13 +8,15 @@ import threading
 import time
 import os
 import sys
+from dotenv import load_dotenv
 
 from gm.api import *
 import nats
 from pbs.message_pb2 import Tick, Bar, Quote
 
-STRATEGY_ID = '38aab753-9bcf-11f1-a452-00ff0cd61834'
-TOKEN = '073faa373d7a42b7925aa1f15c1781a266d09183'
+load_dotenv()
+STRATEGY_ID = os.getenv("STRATEGY_ID")
+TOKEN = os.getenv('JJ_TOKEN')
 CODES = ['SHSE.600519']
 NATS_URL = 'nats://192.168.80.131:4222'
 

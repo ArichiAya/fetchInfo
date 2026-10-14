@@ -23,7 +23,7 @@ import {
   fetchPositions,
   fetchSubscriptions,
   subscribeStock,
-  unsubscribeStock
+  // unsubscribeStock
 } from '@/api/business'
 import { usePolling } from '@/composables/usePolling'
 import {
@@ -252,17 +252,9 @@ async function handleSubscribe() {
   }
 }
 
-async function handleUnsubscribe(code: string) {
-  try {
-    await unsubscribeStock(code)
-    subscriptions.value = subscriptions.value.filter((s) => s.code !== code)
-  } catch (err) {
-    if (err instanceof ApiRequestError && err.code === 'SUBSCRIPTION_NOT_FOUND') {
-      subscriptions.value = subscriptions.value.filter((s) => s.code !== code)
-      return
-    }
-    reportError(err, '取消订阅失败')
-  }
+
+async function handleUnsubscribe(index: number) {
+  subscriptions.value.splice(index,1)
 }
 
 /** 切换正在查看的标的，并立刻拉一轮，不用等下一次轮询 */
@@ -397,7 +389,7 @@ onMounted(async () => {
           </span>
           <div class="subscribed-tags">
             <el-tag
-              v-for="sub in subscriptions"
+              v-for="(sub, index) in subscriptions"
               :key="sub.code"
               closable
               round
@@ -405,7 +397,7 @@ onMounted(async () => {
               class="stock-tag"
               :effect="sub.code === currentCode ? 'dark' : 'plain'"
               @click="selectStock(sub)"
-              @close="handleUnsubscribe(sub.code)"
+              @close="handleUnsubscribe(index)"
             >
               {{ sub.name }}
             </el-tag>

@@ -69,14 +69,16 @@ func main() {
 		log.Fatal("Failed to create auth middleware:", err)
 	}
 
-	router.POST("/login", jwtAuthMiddleware.LoginHandler)
-	router.POST("/register", httpapi.RegisterHandler(pool))
+	// login/register 走 business 的 auth,分析服务不提供注册登录
+	// router.POST("/login", jwtAuthMiddleware.LoginHandler)
+	// router.POST("/register", httpapi.RegisterHandler(pool))
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(404, gin.H{"error": gin.H{"code": "NOT_FOUND", "message": "Resource not found"}})
 	})
 
 	authGroup := router.Group("/api", jwtAuthMiddleware.MiddlewareFunc())
-	authGroup.GET("/refresh_token", jwtAuthMiddleware.RefreshHandler)
+	// api/refresh_token 移动到 business
+	// authGroup.GET("/refresh_token", jwtAuthMiddleware.RefreshHandler)
 	authGroup.GET("/market/stocks/search", httpapi.SearchStocksHandler(pool))
 	// 验证鉴权,假设snapshot需要admin
 	authGroup.GET("/market/stocks/:code/snapshot", auth.RoleAuth("admin"), httpapi.GetStockSnapshotHandler(pool))
@@ -93,6 +95,8 @@ func main() {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
+
+	log.Printf("Server is running on port %s\n", port)
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)

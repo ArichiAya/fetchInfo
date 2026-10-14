@@ -16,7 +16,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // fail 统一错误体,与 docs/api.md 的约定一致:
@@ -188,8 +187,8 @@ func GetStockTickHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		`
 
 		// 调试看sql语句
-		log.Print(safeQueryStr)
-		rows, err := pool.Query(context.Background(), safeQueryStr, date)
+		// log.Print(safeQueryStr)
+		rows, err := pool.Query(c.Request.Context(), safeQueryStr, date)
 		if err != nil {
 			fail(c, 500, "INTERNAL", "Failed to query database")
 			return
@@ -204,7 +203,7 @@ func GetStockTickHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			var volume string
 			if err := rows.Scan(&minute, &price, &avgPrice, &volume); err != nil {
 				// 调试看错误信息
-				fail(c, 500, "INTERNAL", "Failed to scan row"+err.Error())
+				fail(c, 500, "INTERNAL", "Failed to scan row")
 				return
 			}
 			ticks = append(ticks, gin.H{
@@ -270,7 +269,7 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		`
 
 		// 调试看sql语句
-		log.Print(safeQueryStr)
+		// log.Print(safeQueryStr)
 		rows, err := pool.Query(context.Background(), safeQueryStr, period, limit, date)
 		if err != nil {
 			fail(c, 500, "INTERNAL", "Failed to query database")
@@ -290,7 +289,7 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			var open, close, high, low, volume, amount string
 			if err := rows.Scan(&period, &open, &close, &high, &low, &volume, &amount); err != nil {
 				// 调试看错误信息
-				fail(c, 500, "INTERNAL", "Failed to scan row"+err.Error())
+				fail(c, 500, "INTERNAL", "Failed to scan row")
 				return
 			}
 			klines = append(klines, gin.H{
@@ -313,34 +312,35 @@ func GetStockKlineHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
+// 已移动到business/internal/httpapi/v1/v1.go
 // POST /register
 // { "username": "alice", "password": "secret123" }
 // 201 { "code": 201 }
-func RegisterHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Username string `json:"username" binding:"required"`
-			Password string `json:"password" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			fail(c, 400, "INVALID_PARAM", "Invalid request body")
-			return
-		}
+// func RegisterHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+// 	return func(c *gin.Context) {
+// 		var req struct {
+// 			Username string `json:"username" binding:"required"`
+// 			Password string `json:"password" binding:"required"`
+// 		}
+// 		if err := c.ShouldBindJSON(&req); err != nil {
+// 			fail(c, 400, "INVALID_PARAM", "Invalid request body")
+// 			return
+// 		}
 
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-		if err != nil {
-			fail(c, 500, "INTERNAL", "Failed to hash password")
-			return
-		}
+// 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+// 		if err != nil {
+// 			fail(c, 500, "INTERNAL", "Failed to hash password")
+// 			return
+// 		}
 
-		queryStr := `INSERT INTO users (username, password, role) VALUES ($1, $2, $3)`
-		_, err = pool.Exec(c.Request.Context(), queryStr, req.Username, string(hashedPassword), "user")
-		if err != nil {
-			fail(c, 500, "INTERNAL", "Failed to register user")
-			return
-		}
+// 		queryStr := `INSERT INTO users (username, password, role) VALUES ($1, $2, $3)`
+// 		_, err = pool.Exec(c.Request.Context(), queryStr, req.Username, string(hashedPassword), "user")
+// 		if err != nil {
+// 			fail(c, 500, "INTERNAL", "Failed to register user")
+// 			return
+// 		}
 
-		// 不返回 id/username:前端注册后只提示成功再切回登录,拿不到也用不上
-		c.JSON(201, gin.H{"code": 201})
-	}
-}
+// 		// 不返回 id/username:前端注册后只提示成功再切回登录,拿不到也用不上
+// 		c.JSON(201, gin.H{"code": 201})
+// 	}
+// }

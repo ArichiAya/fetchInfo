@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
   // 后端地址：默认指向 analysis/cmd/server（端口 8555，见 backend/analysis/cmd/server/main.go）
   // 要改成别的后端，在 frontend/fcinfo/.env.local 里写 VITE_API_TARGET=http://host:port
   const env = loadEnv(mode, process.cwd(), '')
-  const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8555'
+  const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8687'
 
   return {
     plugins: [
